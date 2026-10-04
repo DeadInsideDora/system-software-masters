@@ -1,0 +1,21 @@
+int main() {
+    int i = 0, total = 0;
+    while (i < 10) {
+        i += 1;
+        if (i % 2 == 0) continue;
+        if (i > 7) break;
+        total += i;
+    }
+    do {
+        total -= 1;
+        if (total > 13) continue;
+    } while (total > 13);
+    int untouched = 0;
+    if (false && (untouched = 1)) total = 100;
+    if (true || (untouched = 2)) total += 1;
+    print_int(total);
+    write(' ');
+    print_int(untouched);
+    write('\n');
+    return 0;
+}

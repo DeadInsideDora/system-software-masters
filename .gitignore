@@ -1,0 +1,13 @@
+/build*/
+/.local/
+/output/
+/ffi/perl/blib/
+/ffi/perl/Makefile
+/ffi/perl/Makefile.old
+/ffi/perl/MYMETA.*
+/ffi/perl/MoarVM.c
+/ffi/perl/*.o
+/ffi/perl/*.bs
+/ffi/perl/pm_to_blib
+__pycache__/
+.DS_Store

@@ -1,0 +1,38 @@
+void write(char c);
+char read();
+
+put_str(str, size) {
+    i = 0;
+    while (i < size) {
+        write(str[i]);
+        i +=1;
+    }
+}
+
+put_int(a) {
+    if (a > 9) put_int(a / 10);
+    if (a != 0) write((a % 10) + '0');
+}
+
+fact(n) {
+    if (n < 0) {
+        return 0;
+    } else if (n == 1) {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+
+main() {
+    a = "Hello, world!";
+    put_str(a, 13);
+    write(10);
+
+    a = 3;
+    put_int(a);
+    write(10);
+
+    a = a + fact(5);
+    put_int(a);
+    write(10);
+}

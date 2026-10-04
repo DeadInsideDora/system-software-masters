@@ -1,0 +1,55 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "parse_module.h"
+#include "parser.tab.h"
+typedef void *yyscan_t;
+typedef struct yy_buffer_state *YY_BUFFER_STATE;
+int yylex_init_extra(ParseContext *, yyscan_t *);
+int yylex_destroy(yyscan_t);
+YY_BUFFER_STATE yy_scan_string(const char *, yyscan_t);
+void yy_delete_buffer(YY_BUFFER_STATE, yyscan_t);
+void yyset_lineno(int, yyscan_t);
+int yyparse(ParseContext *, yyscan_t);
+int yylex(YYSTYPE *, YYLTYPE *, yyscan_t);
+void report_parse_error(ParseContext *ctx, int line, const char *message) {
+    char text[1024];
+    char **items = realloc(ctx->errors, (ctx->nerrors + 1) * sizeof(*items));
+    if (!items)
+        return;
+    ctx->errors = items;
+    snprintf(text, sizeof(text), "line %d: %s", line, message);
+    ctx->errors[ctx->nerrors++] = strdup(text);
+}
+AST *parse_string(const char *input, char ***out_errors, int *out_nerrors) {
+    ParseContext ctx = {0};
+    yyscan_t scanner = NULL;
+    YY_BUFFER_STATE buffer = NULL;
+    int status = 1;
+    if (yylex_init_extra(&ctx, &scanner) == 0) {
+        buffer = yy_scan_string(input, scanner);
+        if (buffer) {
+            yyset_lineno(1, scanner);
+            status = yyparse(&ctx, scanner);
+        }
+        if (buffer)
+            yy_delete_buffer(buffer, scanner);
+        yylex_destroy(scanner);
+    }
+    if (status && !ctx.nerrors)
+        report_parse_error(&ctx, 1, "parser failed");
+    if (status || ctx.nerrors) {
+        ast_free(ctx.root);
+        ctx.root = NULL;
+    }
+    if (out_nerrors)
+        *out_nerrors = ctx.nerrors;
+    if (out_errors)
+        *out_errors = ctx.errors;
+    else {
+        for (int i = 0; i < ctx.nerrors; ++i)
+            free(ctx.errors[i]);
+        free(ctx.errors);
+    }
+    return ctx.root;
+}
