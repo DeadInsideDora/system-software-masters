@@ -1,0 +1,156 @@
+string animal_name(int id) {
+    if (id == 0) return "Dog A";
+    if (id == 1) return "Dog B";
+    if (id == 2) return "Cat C";
+    if (id == 3) return "Cat D";
+    if (id == 4) return "Dog E";
+    if (id == 5) return "Dog F";
+    if (id == 6) return "Cat G";
+    return "Temporary animal";
+}
+
+int animal_is_cat(int id) {
+    return id == 2 || id == 3 || id == 6;
+}
+
+void animal_new(int heap, int root, int id) {
+    vm_assert(gc_new(heap, root, 3, 1), 200);
+    gc_set_value(heap, root, 1, id);
+    gc_set_value(heap, root, 2, animal_is_cat(id));
+}
+
+int animals_print(int heap, int list) {
+    int mark = gc_mark(heap);
+    int cursor = gc_root(heap);
+    gc_assign(heap, cursor, list);
+    int count = 0;
+    while (gc_address(heap, cursor) != 0 && count < 7) {
+        int id = gc_value(heap, cursor, 1);
+        print(animal_name(id));
+        if (gc_value(heap, cursor, 2)) print(": meow\n");
+        else print(": barks\n");
+        gc_get_ref(heap, cursor, cursor, 0);
+        count += 1;
+    }
+    vm_assert(gc_address(heap, cursor) == 0, 201);
+    gc_release(heap, mark);
+    return count;
+}
+
+void animals_select_cats(int heap, int all, int cats) {
+    int mark = gc_mark(heap);
+    int cursor = gc_root(heap);
+    int next = gc_root(heap);
+    int tail = gc_root(heap);
+    gc_assign(heap, cursor, all);
+    gc_clear(heap, all);
+    int visited = 0;
+    while (gc_address(heap, cursor) != 0 && visited < 7) {
+        gc_get_ref(heap, next, cursor, 0);
+        gc_set_ref(heap, cursor, 0, 0);
+        if (gc_value(heap, cursor, 2)) {
+            if (gc_address(heap, cats) == 0) gc_assign(heap, cats, cursor);
+            else gc_set_ref(heap, tail, 0, cursor);
+            gc_assign(heap, tail, cursor);
+        }
+        gc_assign(heap, cursor, next);
+        visited += 1;
+    }
+    vm_assert(visited == 7 && gc_address(heap, cursor) == 0, 202);
+    gc_release(heap, mark);
+}
+
+void animals_check_cats(int heap, int cats) {
+    int mark = gc_mark(heap);
+    int cursor = gc_root(heap);
+    gc_assign(heap, cursor, cats);
+    vm_assert(gc_value(heap, cursor, 1) == 2, 203);
+    gc_get_ref(heap, cursor, cursor, 0);
+    vm_assert(gc_value(heap, cursor, 1) == 3, 204);
+    gc_get_ref(heap, cursor, cursor, 0);
+    vm_assert(gc_value(heap, cursor, 1) == 6, 205);
+    gc_get_ref(heap, cursor, cursor, 0);
+    vm_assert(gc_address(heap, cursor) == 0, 206);
+    gc_release(heap, mark);
+}
+
+int main() {
+    int heap = 1;
+    int space = vm_arg(0);
+    int roots = vm_arg(1);
+    int rounds = vm_arg(2);
+    int animal_words = GC_HEADER_WORDS + 3;
+    vm_assert(space >= 7 * animal_words && roots >= 8, 207);
+    gc_init(heap, space, roots);
+    int all = gc_root(heap);
+    int tail = gc_root(heap);
+    int temporary = gc_root(heap);
+    int cats = gc_root(heap);
+    int alias = gc_root(heap);
+    int id = 0;
+    while (id < 7) {
+        animal_new(heap, temporary, id);
+        if (id == 0) gc_assign(heap, all, temporary);
+        else gc_set_ref(heap, tail, 0, temporary);
+        gc_assign(heap, tail, temporary);
+        id += 1;
+    }
+    gc_clear(heap, tail);
+    gc_clear(heap, temporary);
+    print("=== 1. Все животные ===\n");
+    vm_assert(animals_print(heap, all) == 7, 208);
+    print("Занято слов: "); vm_print(gc_used(heap));
+
+    animals_select_cats(heap, all, cats);
+    gc_assign(heap, alias, cats);
+    int before = gc_address(heap, cats);
+    gc_collect(heap);
+    vm_assert(gc_address(heap, cats) != before, 209);
+    vm_assert(gc_address(heap, cats) == gc_address(heap, alias), 210);
+    vm_assert(gc_verify(heap) == 3 && gc_used(heap) == 3 * animal_words, 211);
+    vm_assert(vm_load(heap + GC_LAST_COPIED_OBJECTS) == 3, 212);
+    vm_assert(vm_load(heap + GC_RECLAIMED_WORDS) == 4 * animal_words, 213);
+    animals_check_cats(heap, cats);
+    print("=== 2. Оставили только кошек, выполнили GC ===\n");
+    vm_assert(animals_print(heap, cats) == 3, 214);
+    print("Индекс Cat C до GC: "); vm_print(before);
+    print("Индекс Cat C после GC: "); vm_print(gc_address(heap, cats));
+    print("Занято слов: "); vm_print(gc_used(heap));
+    print("Освобождено слов (4 собаки): "); vm_print(vm_load(heap + GC_RECLAIMED_WORDS));
+    print("Два корня указывают на одну Cat C: OK\n");
+
+    int collections_before = vm_load(heap + GC_COLLECTIONS);
+    int i = 0;
+    while (i < rounds) {
+        gc_clear(heap, temporary);
+        animal_new(heap, temporary, 7 + i);
+        animals_check_cats(heap, cats);
+        i += 1;
+    }
+    int automatic = vm_load(heap + GC_COLLECTIONS) - collections_before;
+    gc_clear(heap, temporary);
+    gc_collect(heap);
+    vm_assert(gc_verify(heap) == 3, 215);
+    print("=== 3. Временные животные и автоматический GC ===\n");
+    print("Создано временных животных: "); vm_print(rounds);
+    print("Автоматических сборок: "); vm_print(automatic);
+    vm_assert(animals_print(heap, cats) == 3, 216);
+
+    gc_clear(heap, cats);
+    gc_collect(heap);
+    vm_assert(gc_verify(heap) == 3 && gc_used(heap) == 3 * animal_words, 217);
+    animals_check_cats(heap, alias);
+    print("=== 4. Сняли корень cats, но остался alias ===\n");
+    print("Живых животных: "); vm_print(gc_verify(heap));
+    print("Занято слов: "); vm_print(gc_used(heap));
+
+    gc_clear(heap, alias);
+    gc_collect(heap);
+    vm_assert(gc_verify(heap) == 0 && gc_used(heap) == 0, 218);
+    vm_assert(vm_load(heap + GC_ALLOCATED_WORDS) == vm_load(heap + GC_RECLAIMED_WORDS), 219);
+    print("=== 5. Сняли последний корень ===\n");
+    print("Живых животных: "); vm_print(gc_verify(heap));
+    print("Занято слов: "); vm_print(gc_used(heap));
+    print("ANIMALS GC: OK\n");
+    return 0;
+}

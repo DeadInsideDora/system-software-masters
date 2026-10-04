@@ -1,0 +1,273 @@
+void vm_assert(int condition, int code) {
+    if (!condition) vm_stop(code);
+}
+
+void vm_print(int value) {
+    print_int(value);
+    vm_out(10);
+}
+
+int gc_region_words(int space, int roots) {
+    vm_assert(vm_words() >= GC_STATE_WORDS, GC_BAD_LAYOUT);
+    vm_assert(space >= GC_HEADER_WORDS && space <= vm_words() / 2, GC_BAD_LAYOUT);
+    vm_assert(roots > 0 && roots <= vm_words() - GC_STATE_WORDS, GC_BAD_LAYOUT);
+    vm_assert(space * 2 <= vm_words() - GC_STATE_WORDS - roots, GC_BAD_LAYOUT);
+    return GC_STATE_WORDS + roots + space * 2;
+}
+
+void gc_init(int heap, int space, int roots) {
+    int words = gc_region_words(space, roots);
+    vm_assert(heap > 0 && heap <= vm_words() - words, GC_BAD_LAYOUT);
+    int i = 0;
+    while (i < GC_STATE_WORDS + roots) {
+        vm_store(heap + i, 0);
+        i += 1;
+    }
+    vm_store(heap + GC_TAG, GC_TAG_VALUE);
+    vm_store(heap + GC_SPACE, space);
+    vm_store(heap + GC_ROOTS, heap + GC_STATE_WORDS);
+    vm_store(heap + GC_ROOT_CAPACITY, roots);
+    int start = heap + GC_STATE_WORDS + roots;
+    vm_store(heap + GC_FROM, start);
+    vm_store(heap + GC_TO, start + space);
+    vm_store(heap + GC_FREE, start);
+    vm_trace(heap, GC_TRACE_INIT);
+}
+
+void gc_require_heap(int heap) {
+    vm_assert(vm_words() >= GC_STATE_WORDS, GC_BAD_HEAP);
+    vm_assert(heap > 0 && heap <= vm_words() - GC_STATE_WORDS, GC_BAD_HEAP);
+    vm_assert(vm_load(heap + GC_TAG) == GC_TAG_VALUE, GC_BAD_HEAP);
+}
+
+int gc_root_slot(int heap, int root) {
+    gc_require_heap(heap);
+    vm_assert(root > 0 && root <= vm_load(heap + GC_ROOT_COUNT), GC_BAD_ROOT);
+    return vm_load(heap + GC_ROOTS) + root - 1;
+}
+
+int gc_root(int heap) {
+    gc_require_heap(heap);
+    int count = vm_load(heap + GC_ROOT_COUNT);
+    vm_assert(count < vm_load(heap + GC_ROOT_CAPACITY), GC_ROOT_OVERFLOW);
+    vm_store(vm_load(heap + GC_ROOTS) + count, 0);
+    vm_store(heap + GC_ROOT_COUNT, count + 1);
+    return count + 1;
+}
+
+int gc_mark(int heap) {
+    gc_require_heap(heap);
+    return vm_load(heap + GC_ROOT_COUNT);
+}
+
+void gc_release(int heap, int mark) {
+    gc_require_heap(heap);
+    int count = vm_load(heap + GC_ROOT_COUNT);
+    vm_assert(mark >= 0 && mark <= count, GC_BAD_ROOT);
+    while (count > mark) {
+        count -= 1;
+        vm_store(vm_load(heap + GC_ROOTS) + count, 0);
+    }
+    vm_store(heap + GC_ROOT_COUNT, mark);
+}
+
+int gc_address(int heap, int root) {
+    gc_require_heap(heap);
+    if (root == 0) return 0;
+    return vm_load(gc_root_slot(heap, root));
+}
+
+void gc_clear(int heap, int root) {
+    vm_store(gc_root_slot(heap, root), 0);
+}
+
+void gc_assign(int heap, int destination, int source) {
+    vm_store(gc_root_slot(heap, destination), gc_address(heap, source));
+}
+
+int gc_used(int heap) {
+    gc_require_heap(heap);
+    return vm_load(heap + GC_FREE) - vm_load(heap + GC_FROM);
+}
+
+int gc_copy(int heap, int object) {
+    if (object == 0) return 0;
+    int start = vm_load(heap + GC_FROM);
+    int end = vm_load(heap + GC_FREE);
+    vm_assert(object >= start && object < end, GC_BAD_OBJECT);
+    vm_assert(end - object >= GC_HEADER_WORDS, GC_BAD_OBJECT);
+    int forwarded = vm_load(object + GC_FORWARD);
+    if (forwarded != 0) return forwarded;
+    int fields = vm_load(object + GC_FIELDS);
+    vm_assert(fields >= 0 && fields <= end - object - GC_HEADER_WORDS, GC_BAD_OBJECT);
+    int words = GC_HEADER_WORDS + fields;
+    int target = vm_load(heap + GC_COPY_FREE);
+    int limit = vm_load(heap + GC_TO) + vm_load(heap + GC_SPACE);
+    vm_assert(target <= limit && words <= limit - target, GC_COPY_OVERFLOW);
+    int i = 0;
+    while (i < words) {
+        vm_store(target + i, vm_load(object + i));
+        i += 1;
+    }
+    vm_store(object + GC_FORWARD, target);
+    vm_store(heap + GC_COPY_FREE, target + words);
+    vm_store(heap + GC_LAST_COPIED_OBJECTS, vm_load(heap + GC_LAST_COPIED_OBJECTS) + 1);
+    return target;
+}
+
+void gc_collect(int heap) {
+    gc_require_heap(heap);
+    vm_trace(heap, GC_TRACE_BEFORE);
+    int old_start = vm_load(heap + GC_FROM);
+    int old_words = gc_used(heap);
+    int to = vm_load(heap + GC_TO);
+    vm_store(heap + GC_SCAN, to);
+    vm_store(heap + GC_COPY_FREE, to);
+    vm_store(heap + GC_LAST_COPIED_OBJECTS, 0);
+    int survivors = 0;
+    int root_updates = 0;
+    int edge_updates = 0;
+    int roots = vm_load(heap + GC_ROOTS);
+    int count = vm_load(heap + GC_ROOT_COUNT);
+    int i = 0;
+    while (i < count) {
+        int old_root = vm_load(roots + i);
+        int new_root = gc_copy(heap, old_root);
+        vm_store(roots + i, new_root);
+        if (new_root != old_root) root_updates += 1;
+        i += 1;
+    }
+    vm_store(heap + GC_ROOT_VISITS, vm_load(heap + GC_ROOT_VISITS) + count);
+    int scan = vm_load(heap + GC_SCAN);
+    while (scan < vm_load(heap + GC_COPY_FREE)) {
+        int references = vm_load(scan + GC_REFS);
+        vm_assert(references >= 0 && references <= vm_load(scan + GC_FIELDS), GC_BAD_OBJECT);
+        i = 0;
+        while (i < references) {
+            int slot = scan + GC_HEADER_WORDS + i;
+            int old_reference = vm_load(slot);
+            int new_reference = gc_copy(heap, old_reference);
+            vm_store(slot, new_reference);
+            if (new_reference != old_reference) edge_updates += 1;
+            i += 1;
+        }
+        vm_store(heap + GC_EDGE_VISITS, vm_load(heap + GC_EDGE_VISITS) + references);
+        survivors += 1;
+        scan += GC_HEADER_WORDS + vm_load(scan + GC_FIELDS);
+        vm_store(heap + GC_SCAN, scan);
+    }
+    vm_assert(scan == vm_load(heap + GC_COPY_FREE), GC_BAD_OBJECT);
+    int live = vm_load(heap + GC_COPY_FREE) - to;
+    vm_store(heap + GC_FROM, to);
+    vm_store(heap + GC_TO, old_start);
+    vm_store(heap + GC_FREE, to + live);
+    vm_store(heap + GC_COLLECTIONS, vm_load(heap + GC_COLLECTIONS) + 1);
+    vm_store(heap + GC_LAST_LIVE_WORDS, live);
+    vm_store(heap + GC_COPIED_WORDS, vm_load(heap + GC_COPIED_WORDS) + live);
+    vm_store(heap + GC_COPIED_OBJECTS,
+             vm_load(heap + GC_COPIED_OBJECTS) + vm_load(heap + GC_LAST_COPIED_OBJECTS));
+    vm_store(heap + GC_RECLAIMED_WORDS, vm_load(heap + GC_RECLAIMED_WORDS) + old_words - live);
+    vm_trace_gc(heap, survivors, root_updates, edge_updates);
+}
+
+int gc_new(int heap, int destination, int fields, int references) {
+    int slot = gc_root_slot(heap, destination);
+    int space = vm_load(heap + GC_SPACE);
+    vm_assert(fields >= 0 && references >= 0 && references <= fields, GC_BAD_LAYOUT);
+    if (fields > space - GC_HEADER_WORDS) return 0;
+    int words = fields + GC_HEADER_WORDS;
+    if (words > space - gc_used(heap)) gc_collect(heap);
+    if (words > space - gc_used(heap)) return 0;
+    int object = vm_load(heap + GC_FREE);
+    vm_store(object + GC_FIELDS, fields);
+    vm_store(object + GC_REFS, references);
+    vm_store(object + GC_FORWARD, 0);
+    int i = 0;
+    while (i < fields) {
+        vm_store(object + GC_HEADER_WORDS + i, 0);
+        i += 1;
+    }
+    vm_store(heap + GC_FREE, object + words);
+    vm_store(slot, object);
+    vm_store(heap + GC_ALLOCATED_OBJECTS, vm_load(heap + GC_ALLOCATED_OBJECTS) + 1);
+    vm_store(heap + GC_ALLOCATED_WORDS, vm_load(heap + GC_ALLOCATED_WORDS) + words);
+    int used = gc_used(heap);
+    if (used > vm_load(heap + GC_PEAK_WORDS)) vm_store(heap + GC_PEAK_WORDS, used);
+    vm_trace(heap, GC_TRACE_ALLOC);
+    return 1;
+}
+
+int gc_object(int heap, int root) {
+    int object = gc_address(heap, root);
+    vm_assert(object != 0, GC_BAD_OBJECT);
+    return object;
+}
+
+int gc_value(int heap, int root, int field) {
+    int object = gc_object(heap, root);
+    vm_assert(field >= vm_load(object + GC_REFS) && field < vm_load(object + GC_FIELDS), GC_BAD_FIELD);
+    return vm_load(object + GC_HEADER_WORDS + field);
+}
+
+void gc_set_value(int heap, int root, int field, int value) {
+    int object = gc_object(heap, root);
+    vm_assert(field >= vm_load(object + GC_REFS) && field < vm_load(object + GC_FIELDS), GC_BAD_FIELD);
+    vm_store(object + GC_HEADER_WORDS + field, value);
+}
+
+void gc_set_ref(int heap, int root, int field, int target) {
+    int object = gc_object(heap, root);
+    vm_assert(field >= 0 && field < vm_load(object + GC_REFS), GC_BAD_FIELD);
+    vm_store(object + GC_HEADER_WORDS + field, gc_address(heap, target));
+}
+
+void gc_get_ref(int heap, int destination, int root, int field) {
+    int object = gc_object(heap, root);
+    vm_assert(field >= 0 && field < vm_load(object + GC_REFS), GC_BAD_FIELD);
+    vm_store(gc_root_slot(heap, destination), vm_load(object + GC_HEADER_WORDS + field));
+}
+
+int gc_is_object(int heap, int pointer) {
+    if (pointer == 0) return 1;
+    int position = vm_load(heap + GC_FROM);
+    int end = vm_load(heap + GC_FREE);
+    while (position < end) {
+        vm_assert(end - position >= GC_HEADER_WORDS, GC_BAD_OBJECT);
+        int fields = vm_load(position + GC_FIELDS);
+        vm_assert(fields >= 0 && fields <= end - position - GC_HEADER_WORDS, GC_BAD_OBJECT);
+        if (position == pointer) return 1;
+        position += GC_HEADER_WORDS + fields;
+    }
+    return 0;
+}
+
+int gc_verify(int heap) {
+    gc_require_heap(heap);
+    int position = vm_load(heap + GC_FROM);
+    int end = vm_load(heap + GC_FREE);
+    vm_assert(end >= position && end - position <= vm_load(heap + GC_SPACE), GC_BAD_HEAP);
+    int objects = 0;
+    while (position < end) {
+        vm_assert(end - position >= GC_HEADER_WORDS, GC_BAD_OBJECT);
+        int fields = vm_load(position + GC_FIELDS);
+        int refs = vm_load(position + GC_REFS);
+        vm_assert(fields >= 0 && fields <= end - position - GC_HEADER_WORDS && refs >= 0 && refs <= fields, GC_BAD_OBJECT);
+        vm_assert(vm_load(position + GC_FORWARD) == 0, GC_BAD_OBJECT);
+        int i = 0;
+        while (i < refs) {
+            vm_assert(gc_is_object(heap, vm_load(position + GC_HEADER_WORDS + i)), GC_BAD_OBJECT);
+            i += 1;
+        }
+        objects += 1;
+        position += GC_HEADER_WORDS + fields;
+    }
+    vm_assert(position == end, GC_BAD_OBJECT);
+    int count = vm_load(heap + GC_ROOT_COUNT);
+    vm_assert(count >= 0 && count <= vm_load(heap + GC_ROOT_CAPACITY), GC_BAD_ROOT);
+    int root_index = 0;
+    while (root_index < count) {
+        vm_assert(gc_is_object(heap, vm_load(vm_load(heap + GC_ROOTS) + root_index)), GC_BAD_ROOT);
+        root_index += 1;
+    }
+    return objects;
+}

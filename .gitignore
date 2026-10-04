@@ -1,0 +1,13 @@
+build*/
+output/
+.local/
+.venv/
+__pycache__/
+.DS_Store
+*.o
+*.d
+*.moarvm
+*.moarvm.*
+parser.tab.*
+parser.output
+lex.yy.c
