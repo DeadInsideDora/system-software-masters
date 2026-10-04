@@ -1,0 +1,11 @@
+#ifndef SPO_MOARVM_FFI_ABI_H
+#define SPO_MOARVM_FFI_ABI_H
+#define SPO_FFI_ABI_VERSION 1
+#define SPO_FFI_HLL "spo"
+#define SPO_FFI_REQUEST "__spo_ffi_request"
+#define SPO_FFI_EXPORTS "__spo_ffi_exports"
+#define SPO_FFI_VERSION "__spo_ffi_version"
+enum { SPO_FFI_CODE, SPO_FFI_ARGS, SPO_FFI_VOID, SPO_FFI_RESULT, SPO_FFI_ERROR, SPO_FFI_SLOTS };
+enum { SPO_EXPORT_NAME, SPO_EXPORT_CODE, SPO_EXPORT_SIGNATURE };
+enum { SPO_RUNTIME_CATCH, SPO_RUNTIME_LOAD, SPO_RUNTIME_CALL };
+#endif

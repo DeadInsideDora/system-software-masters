@@ -1,0 +1,191 @@
+#ifndef SPO_MOARVM_OPS_H
+#define SPO_MOARVM_OPS_H
+#include <stdint.h>
+typedef struct {
+    uint16_t code;
+    const char *name;
+    const char *operands;
+} MoarVMOp;
+#define OP_CONST_I64 4u
+#define OP_CONST_S 7u
+#define OP_SET 8u
+#define OP_GOTO 23u
+#define OP_IF_I 24u
+#define OP_UNLESS_I 25u
+#define OP_RETURN 55u
+#define OP_RETURN_I 51u
+#define OP_RETURN_S 53u
+#define OP_RETURN_O 54u
+#define OP_EQ_I 56u
+#define OP_NE_I 57u
+#define OP_LT_I 58u
+#define OP_LE_I 59u
+#define OP_GT_I 60u
+#define OP_GE_I 61u
+#define OP_ADD_I 63u
+#define OP_SUB_I 64u
+#define OP_MUL_I 65u
+#define OP_DIV_I 66u
+#define OP_MOD_I 68u
+#define OP_BAND_I 76u
+#define OP_BOR_I 77u
+#define OP_NEG_I 70u
+#define OP_NOT_I 83u
+#define OP_COERCE_IS 121u
+#define OP_COERCE_SI 123u
+#define OP_CHECKARITY 140u
+#define OP_PARAM_RP_I 141u
+#define OP_PARAM_RP_S 143u
+#define OP_PARAM_RP_O 144u
+#define OP_PARAMNAMESUSED 558u
+#define OP_GETCODE 159u
+#define OP_GETLEX 35u
+#define OP_BINDLEX 36u
+#define OP_TAKECLOSURE 162u
+#define OP_NULL 247u
+#define OP_EXCEPTION 163u
+#define OP_GETEXMESSAGE 167u
+#define OP_LOADBYTECODE 413u
+#define OP_DISPATCH_V 826u
+#define OP_DISPATCH_I 827u
+#define OP_DISPATCH_S 829u
+#define OP_DISPATCH_O 830u
+#define OP_PRINT 494u
+#define OP_CHR 229u
+#define OP_CHARS 228u
+#define OP_ORDAT 231u
+#define OP_CONCAT_S 208u
+#define OP_EQ_S 198u
+#define OP_NE_S 199u
+#define OP_LT_S 202u
+#define OP_LE_S 203u
+#define OP_GT_S 200u
+#define OP_GE_S 201u
+#define OP_SUBSTR_S 210u
+#define OP_BOOTINT 339u
+#define OP_BOOTSTR 341u
+#define OP_BOOTINTARRAY 343u
+#define OP_BOOTSTRARRAY 345u
+#define OP_BOOTARRAY 342u
+#define OP_BOOTHASH 346u
+#define OP_BOX_I 284u
+#define OP_BOX_S 286u
+#define OP_UNBOX_I 287u
+#define OP_UNBOX_S 289u
+#define OP_ISSTR 349u
+#define OP_ISINT 347u
+#define OP_ISNULL 248u
+#define OP_ISHASH 351u
+#define OP_EQADDR 266u
+#define OP_DIE 176u
+#define OP_CREATE 254u
+#define OP_ATPOS_I 290u
+#define OP_ATPOS_S 292u
+#define OP_ATPOS_O 293u
+#define OP_BINDPOS_I 294u
+#define OP_BINDPOS_S 296u
+#define OP_BINDPOS_O 297u
+#define OP_ELEMS 327u
+#define OP_SETELEMSPOS 315u
+#define OP_GETSTDIN 483u
+#define OP_READ_FHB 540u
+#define OP_NEWTYPE 330u
+#define OP_COMPOSETYPE 331u
+#define OP_KNOWHOW 328u
+#define OP_BINDKEY_O 324u
+#define OP_ATKEY_O 320u
+#define OP_GETCURHLLSYM 360u
+#define OP_BINDCURHLLSYM 361u
+static const MoarVMOp moarvm_ops[] = {
+    {4, "const_i64", "rq"},
+    {7, "const_s", "rs"},
+    {8, "set", "rr"},
+    {23, "goto", "i"},
+    {24, "if_i", "ri"},
+    {25, "unless_i", "ri"},
+    {55, "return", ""},
+    {51, "return_i", "r"},
+    {53, "return_s", "r"},
+    {54, "return_o", "r"},
+    {56, "eq_i", "rrr"},
+    {57, "ne_i", "rrr"},
+    {58, "lt_i", "rrr"},
+    {59, "le_i", "rrr"},
+    {60, "gt_i", "rrr"},
+    {61, "ge_i", "rrr"},
+    {63, "add_i", "rrr"},
+    {64, "sub_i", "rrr"},
+    {65, "mul_i", "rrr"},
+    {66, "div_i", "rrr"},
+    {68, "mod_i", "rrr"},
+    {76, "band_i", "rrr"},
+    {77, "bor_i", "rrr"},
+    {70, "neg_i", "rr"},
+    {83, "not_i", "rr"},
+    {121, "coerce_is", "rr"},
+    {123, "coerce_si", "rr"},
+    {140, "checkarity", "hh"},
+    {141, "param_rp_i", "rh"},
+    {143, "param_rp_s", "rh"},
+    {144, "param_rp_o", "rh"},
+    {558, "paramnamesused", ""},
+    {159, "getcode", "rh"},
+    {35, "getlex", "rhh"},
+    {36, "bindlex", "hhr"},
+    {162, "takeclosure", "rr"},
+    {247, "null", "r"},
+    {163, "exception", "r"},
+    {167, "getexmessage", "rr"},
+    {413, "loadbytecode", "rr"},
+    {826, "dispatch_v", "sh"},
+    {827, "dispatch_i", "rsh"},
+    {829, "dispatch_s", "rsh"},
+    {830, "dispatch_o", "rsh"},
+    {494, "print", "r"},
+    {229, "chr", "rr"},
+    {228, "chars", "rr"},
+    {231, "ordat", "rrr"},
+    {208, "concat_s", "rrr"},
+    {198, "eq_s", "rrr"},
+    {199, "ne_s", "rrr"},
+    {202, "lt_s", "rrr"},
+    {203, "le_s", "rrr"},
+    {200, "gt_s", "rrr"},
+    {201, "ge_s", "rrr"},
+    {210, "substr_s", "rrrr"},
+    {339, "bootint", "r"},
+    {341, "bootstr", "r"},
+    {343, "bootintarray", "r"},
+    {345, "bootstrarray", "r"},
+    {342, "bootarray", "r"},
+    {346, "boothash", "r"},
+    {284, "box_i", "rrr"},
+    {286, "box_s", "rrr"},
+    {287, "unbox_i", "rr"},
+    {289, "unbox_s", "rr"},
+    {349, "isstr", "rr"},
+    {347, "isint", "rr"},
+    {248, "isnull", "rr"},
+    {351, "ishash", "rr"},
+    {266, "eqaddr", "rrr"},
+    {176, "die", "rr"},
+    {254, "create", "rr"},
+    {290, "atpos_i", "rrr"},
+    {292, "atpos_s", "rrr"},
+    {293, "atpos_o", "rrr"},
+    {294, "bindpos_i", "rrr"},
+    {296, "bindpos_s", "rrr"},
+    {297, "bindpos_o", "rrr"},
+    {327, "elems", "rr"},
+    {315, "setelemspos", "rr"},
+    {483, "getstdin", "r"},
+    {540, "read_fhb", "rrr"},
+    {330, "newtype", "rrr"},
+    {331, "composetype", "rrr"},
+    {328, "knowhow", "r"},
+    {324, "bindkey_o", "rrr"},
+    {320, "atkey_o", "rrr"},
+    {360, "getcurhllsym", "rr"},
+    {361, "bindcurhllsym", "rrr"},
+};
+#endif
