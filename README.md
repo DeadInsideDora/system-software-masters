@@ -91,6 +91,3 @@ build/moarvmdirect [--graphs directory] output.moarvm input1 [input2 ...]
 ```sh
 ./tools/moar.sh --dump output/lab2/counter.moarvm
 ```
-
-Результаты сборки и запуска находятся в `build/` и `output/` и исключены
-из Git вместе с локальной установкой VM. `make clean` удаляет `build/`.
