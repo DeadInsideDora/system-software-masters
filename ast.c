@@ -66,6 +66,30 @@ void ast_dot_node(FILE *f, AST *a, int *id) {
     const char *t = a->label ? a->label : "";
 
     switch (a->type) {
+    case NODE_CLASS:
+        snprintf(label, sizeof(label), "class %s", t);
+        break;
+    case NODE_MEMBER:
+        snprintf(label, sizeof(label), "member .%s", t);
+        break;
+    case NODE_MATCH:
+        snprintf(label, sizeof(label), "match");
+        break;
+    case NODE_MATCH_CASE:
+        snprintf(label, sizeof(label), "case %s", t);
+        break;
+    case NODE_OBJECT_NEW:
+        snprintf(label, sizeof(label), "allocate %s", t);
+        break;
+    case NODE_OBJECT_IS:
+        snprintf(label, sizeof(label), "instanceof %s", t);
+        break;
+    case NODE_OBJECT_CAST:
+        snprintf(label, sizeof(label), "matched object %s", t);
+        break;
+    case NODE_METHOD_BIND:
+        snprintf(label, sizeof(label), "bind virtual method %s", t);
+        break;
     case NODE_PROGRAM:
         snprintf(label, sizeof(label), "source source");
         break;

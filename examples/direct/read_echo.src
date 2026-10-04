@@ -1,6 +1,0 @@
-main() {
-    c = read();
-    write(c);
-    write(10);
-    return 0;
-}

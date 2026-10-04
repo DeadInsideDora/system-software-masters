@@ -260,6 +260,8 @@ void moarvm_frame_clear(MoarVMFrame *frame) {
     if (!frame)
         return;
     free(frame->local_types);
+    free(frame->lexical_types);
+    free(frame->lexical_name_indices);
     memset(frame, 0, sizeof(*frame));
 }
 
@@ -295,12 +297,26 @@ uint32_t moarvm_image_add_frame(MoarVMImage *image, const MoarVMFrame *frame) {
     dst = &image->frames[image->frame_count];
     *dst = *frame;
     dst->local_types = NULL;
+    dst->lexical_types = NULL;
+    dst->lexical_name_indices = NULL;
     if (frame->num_locals) {
         size_t bytes = (size_t)frame->num_locals * sizeof(uint16_t);
         dst->local_types = (uint16_t *)malloc(bytes);
         if (!dst->local_types)
             return UINT32_MAX;
         memcpy(dst->local_types, frame->local_types, bytes);
+    }
+    if (frame->num_lexicals) {
+        size_t types_size = frame->num_lexicals * sizeof(*dst->lexical_types);
+        size_t names_size = frame->num_lexicals * sizeof(*dst->lexical_name_indices);
+        dst->lexical_types = malloc(types_size);
+        dst->lexical_name_indices = malloc(names_size);
+        if (!dst->lexical_types || !dst->lexical_name_indices) {
+            moarvm_frame_clear(dst);
+            return UINT32_MAX;
+        }
+        memcpy(dst->lexical_types, frame->lexical_types, types_size);
+        memcpy(dst->lexical_name_indices, frame->lexical_name_indices, names_size);
     }
     return (uint32_t)image->frame_count++;
 }
@@ -370,6 +386,11 @@ static int serialize_frames(const MoarVMImage *image, ByteBuffer *buf) {
                 if (buffer_append_u16(buf, frame->local_types[j]) != 0)
                     return -1;
             }
+        }
+        for (uint32_t j = 0; j < frame->num_lexicals; j++) {
+            if (buffer_append_u16(buf, frame->lexical_types[j]) != 0 ||
+                buffer_append_u32(buf, frame->lexical_name_indices[j]) != 0)
+                return -1;
         }
     }
     return 0;

@@ -1,0 +1,17 @@
+fn(int) -> int parity(int bias) {
+    int even(int n) {
+        if (n == 0) return bias;
+        return odd(n - 1);
+    }
+    int odd(int n) {
+        if (n == 0) return 0;
+        return even(n - 1);
+    }
+    return even;
+}
+int main() {
+    fn(int) -> int is_even = parity(1);
+    print_int(is_even(12)); write(' ');
+    print_int(is_even(13)); write('\n');
+    return 0;
+}

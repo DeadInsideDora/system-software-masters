@@ -1,0 +1,152 @@
+class X {
+    string name;
+    string sound;
+}
+
+class ItX {
+    fn()->bool advance();
+    fn()->X current();
+}
+
+class ItStr {
+    fn()->bool advance();
+    fn()->string current();
+}
+
+
+int[] filter_indices(string[] sounds, string target) {
+    int count = 0;
+    int i = 0;
+    while (i < len(sounds)) {
+        if (sounds[i] == target) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    int[] result = new_int_array(count);
+    int position = 0;
+    i = 0;
+    while (i < len(sounds)) {
+        if (sounds[i] == target) {
+            result[position] = i;
+            position = position + 1;
+        }
+        i = i + 1;
+    }
+}
+string[] map_names(string[] names, int[] indices) {
+    string[] result = new_string_array(len(indices));
+    int i = 0;
+    while (i < len(indices)) {
+        result[i] = names[indices[i]];
+        i = i + 1;
+    }
+}
+int print_names(string[] names) {
+    int i = 0;
+    while (i < len(names)) {
+        write(names[i] + "\n");
+        i = i + 1;
+    }
+}
+
+
+string x2s(X x) {
+    string result = "";
+    match(x) { X(name, sound) => { result = name; } }
+}
+
+fn(X)->bool makeSoundTest(string s) {
+    bool test(X x) {
+        bool result = false;
+        match(x) { X(name, sound) => { result = sound == s; } }
+    }
+    fn(X)->bool result = test;
+}
+ItStr makeItStr(fn()->bool adv, fn()->string get) {
+    ItStr result = ItStr(adv, get);
+}
+
+ItStr makeItX(fn()->bool adv, fn()->X get) {
+    ItStr result = mapToStr(ItX(adv, get), x2s);
+}
+
+ItStr mapToStr(ItX xx, fn(X)->string map) {
+    fn()->bool advance;
+    fn()->X current;
+    match(xx) { ItX(advance, current) => {} }
+    bool adv() { bool result = advance(); }
+    string get() { string result = map(current()); }
+    ItStr result = makeItStr(adv, get);
+}
+void printStrs(ItStr ss) {
+    fn()->bool advance;
+    fn()->string current;
+    match(ss) { ItStr(advance, current) => {} }
+    while (advance()) {
+        write(current() + "\n");
+    }
+}
+ItX iterate(string[] ss, string[] sn, int n) {
+    int i = 0;
+    if (n > len(ss)) n = len(ss);
+    if (n > len(sn)) n = len(sn);
+    X x = makeX("", "");
+    bool adv() {
+        write("@" );
+        bool result = i < n;
+        if (result) {
+            x = makeX(ss[i], sn[i]);
+            i = i + 1;
+        } else x = makeX("", "");
+    }
+    X current() { X result = x; }
+    string get() { string result = x2s(current()); }
+    ItX result = ItX(adv, current);
+}
+X makeX(string s, string n) {
+    X result = X(n, s);
+}
+
+ItX filterX(ItX xx, fn(X)->bool test) {
+    fn()->bool advance;
+    fn()->X current;
+    match(xx) { ItX(advance, current) => {} }
+    X x = makeX("", "");
+    bool adv() {
+        bool result = false;
+        bool searching = true;
+        x = makeX("", "");
+        while (searching) {
+            if (advance()) {
+                x = current();
+                if (test(x)) {
+                    result = true;
+                    searching = false;
+                }
+            } else {
+                x = makeX("", "");
+                searching = false;
+            }
+        }
+    }
+    X get() { X result = x; }
+    ItX result = ItX(adv, get);
+}
+
+int main() {
+    string[] names = new_string_array(7);
+    string[] sounds = new_string_array(7);
+    names[0] = "Dog A"; sounds[0] = "barks";
+    names[1] = "Dog B"; sounds[1] = "barks";
+    names[2] = "Cat C"; sounds[2] = "meow";
+    names[3] = "Cat D"; sounds[3] = "meow";
+    names[4] = "Dog E"; sounds[4] = "barks";
+    names[5] = "Dog F"; sounds[5] = "barks";
+    names[6] = "Cat G"; sounds[6] = "meow";
+
+write("== Cats (meow) ==\n");
+    printStrs(mapToStr(filterX(iterate(sounds, names, 7), makeSoundTest("meow")), x2s));
+    write("== Dogs (barks) ==\n");
+    printStrs(mapToStr(filterX(iterate(sounds, names, 7), makeSoundTest("barks")), x2s));
+}

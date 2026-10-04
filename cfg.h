@@ -27,6 +27,7 @@ typedef struct FunctionCFG {
     CFGNode *entry;
     CFGNode *exit;
     int has_body;
+    struct FunctionCFG *outer;
 } FunctionCFG;
 
 typedef struct AnalysisResult {

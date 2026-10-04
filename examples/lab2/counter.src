@@ -1,0 +1,19 @@
+fn() -> int counter(int start) {
+    int next() {
+        start += 1;
+        return start;
+    }
+    return next;
+}
+int apply(fn() -> int action) {
+    return action();
+}
+int main() {
+    fn() -> int first = counter(10);
+    fn() -> int second = counter(100);
+    print_int(first()); write(' ');
+    print_int(first()); write(' ');
+    print_int(apply(second)); write(' ');
+    print_int(counter(0)()); write('\n');
+    return 0;
+}

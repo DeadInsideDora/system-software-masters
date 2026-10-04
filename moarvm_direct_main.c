@@ -11,6 +11,8 @@ typedef struct {
     AST **original_trees;
     AnalysisResult **analyses;
     char **names;
+    char **type_names;
+    int ntypes;
     int count;
 } Inputs;
 static char *read_file(const char *path) {
@@ -51,7 +53,7 @@ static char *read_file(const char *path) {
 static int add_input(Inputs *in, const char *source, const char *name, int internal) {
     char **errors = NULL;
     int count = 0;
-    AST *tree = parse_string(source, &errors, &count);
+    AST *tree = parse_string_types(source, in->type_names, in->ntypes, &errors, &count);
     for (int i = 0; i < count; i++) {
         fprintf(stderr, "%s: %s\n", name, errors[i]);
         free(errors[i]);
@@ -171,6 +173,7 @@ static int write_graphs(const char *dir, const Inputs *in) {
 }
 int main(int argc, char **argv) {
     Inputs inputs = {0};
+    ObjectProgram objects = {0};
     MoarVMProgramModel model = {0};
     MoarVMImage image = {0};
     char *error = NULL;
@@ -199,6 +202,15 @@ int main(int argc, char **argv) {
         return 2;
     }
     for (int i = first; i < argc; i++) {
+        char *source = read_file(argv[i]);
+        if (!source) {
+            fprintf(stderr, "cannot read input file: %s\n", argv[i]);
+            goto cleanup;
+        }
+        parse_collect_types(source, &inputs.type_names, &inputs.ntypes);
+        free(source);
+    }
+    for (int i = first; i < argc; i++) {
         if (!strcmp(output, argv[i])) {
             fprintf(stderr, "output must not overwrite an input file\n");
             goto cleanup;
@@ -220,6 +232,10 @@ int main(int argc, char **argv) {
         for (int i = 0; i < inputs.count; i++)
             inputs.original_trees[i] = ast_copy(inputs.trees[i]);
     }
+    if (objects_prepare(&objects, inputs.trees, inputs.count)) {
+        fprintf(stderr, "%s\n", objects.error);
+        goto cleanup;
+    }
     for (int i = 0; i < inputs.count; i++) {
         inputs.analyses[i] = build_cfg_from_ast(inputs.trees[i], inputs.names[i]);
         for (int j = 0; j < inputs.analyses[i]->nerrors; j++)
@@ -227,7 +243,7 @@ int main(int argc, char **argv) {
         if (inputs.analyses[i]->nerrors)
             goto cleanup;
     }
-    if (moarvm_build_program_model(inputs.analyses, inputs.count, &model)) {
+    if (moarvm_build_program_model(inputs.analyses, inputs.count, &objects, &model)) {
         fprintf(stderr, "%s\n", model.error);
         goto cleanup;
     }
@@ -253,6 +269,7 @@ cleanup:
     free(error);
     moarvm_image_free(&image);
     moarvm_free_program_model(&model);
+    objects_free(&objects);
     for (int i = 0; i < inputs.count; i++) {
         free_analysis(inputs.analyses[i]);
         ast_free(inputs.trees[i]);
@@ -264,5 +281,8 @@ cleanup:
     free(inputs.trees);
     free(inputs.original_trees);
     free(inputs.names);
+    for (int i = 0; i < inputs.ntypes; i++)
+        free(inputs.type_names[i]);
+    free(inputs.type_names);
     return rc;
 }

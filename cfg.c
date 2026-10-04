@@ -21,12 +21,18 @@ static void error(AnalysisResult *r, const char *s) {
     r->errors = realloc(r->errors, (r->nerrors + 1) * sizeof(*r->errors));
     r->errors[r->nerrors++] = strdup(s);
 }
+static void add_function(AnalysisResult *, AST *, FunctionCFG *, const char *);
 static CFGNode *lower(AnalysisResult *r, FunctionCFG *f, AST *s, CFGNode *next, CFGNode *break_to,
                       CFGNode *continue_to) {
     CFGNode *n;
     if (!s)
         return next;
     switch (s->type) {
+    case NODE_FUNCTION:
+        add_function(r, s, f, f->source_file);
+        n = new_node(f, CFG_NOP, NULL, s->label);
+        n->nextDefault = next;
+        return n;
     case NODE_BLOCK:
     case NODE_PARAM_LIST:
         for (int i = s->nchildren - 1; i >= 0; i--)
@@ -75,9 +81,12 @@ static CFGNode *lower(AnalysisResult *r, FunctionCFG *f, AST *s, CFGNode *next, 
     n->nextDefault = next;
     return n;
 }
-static void add_function(AnalysisResult *r, AST *a, const char *source_file) {
+static void add_function(AnalysisResult *r, AST *a, FunctionCFG *outer, const char *source_file) {
     FunctionCFG *f = calloc(1, sizeof(*f));
-    f->name = strdup(a->label);
+    size_t size = (outer ? strlen(outer->name) + 2 : 0) + strlen(a->label) + 1;
+    f->name = malloc(size);
+    snprintf(f->name, size, "%s%s%s", outer ? outer->name : "", outer ? "::" : "", a->label);
+    f->outer = outer;
     f->signature = a->children[0];
     f->source_file = strdup(source_file ? source_file : "");
     f->has_body = a->nchildren > 1;
@@ -94,7 +103,7 @@ AnalysisResult *build_cfg_from_ast(AST *root, const char *source_file) {
         return r;
     for (int i = 0; i < root->nchildren; i++)
         if (root->children[i]->type == NODE_FUNCTION)
-            add_function(r, root->children[i], source_file);
+            add_function(r, root->children[i], NULL, source_file);
     return r;
 }
 

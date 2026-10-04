@@ -57,6 +57,12 @@ int moarvm_dump_image(FILE *out, const MoarVMImage *image) {
         fprintf(out, "\nframe[%zu] %s offset=%u size=%u outer=%u\n", i,
                 image->strings[frame->name_string_index], frame->bytecode_offset,
                 frame->bytecode_size, frame->outer_index);
+        for (uint32_t j = 0; j < frame->num_lexicals; j++)
+            fprintf(out, "  lexical[%u] %s: %s\n", j,
+                    image->strings[frame->lexical_name_indices[j]],
+                    frame->lexical_types[j] == 4   ? "int64"
+                    : frame->lexical_types[j] == 7 ? "str"
+                                                   : "obj");
         for (uint32_t j = 0; j < frame->num_locals; j++)
             fprintf(out, "  r%u: %s\n", j,
                     frame->local_types[j] == 4   ? "int64"

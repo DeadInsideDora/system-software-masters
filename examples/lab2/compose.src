@@ -1,0 +1,14 @@
+int twice(int value) { return value * 2; }
+int add_one(int value) { return value + 1; }
+
+fn(int) -> int compose(fn(int) -> int f, fn(int) -> int g) {
+    int combined(int value) { return f(g(value)); }
+    return combined;
+}
+int main() {
+    fn(int) -> int transform = compose(twice, add_one);
+    print_int(transform(10)); write('\n');
+    transform = compose(add_one, twice);
+    print_int(transform(10)); write('\n');
+    return 0;
+}

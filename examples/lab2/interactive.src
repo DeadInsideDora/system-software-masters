@@ -1,0 +1,84 @@
+int twice(int value) { return value * 2; }
+int add_one(int value) { return value + 1; }
+
+int apply(fn(int) -> int action, int value) {
+    return action(value);
+}
+
+fn() -> int counter(int start) {
+    int next() {
+        start += 1;
+        return start;
+    }
+    return next;
+}
+
+void menu() {
+    write("\n1 - Вызвать счётчик A (начальное значение 10)\n");
+    write("2 - Вызвать счётчик B (начальное значение 100)\n");
+    write("3 - Вызвать alias (копия исходного замыкания A)\n");
+    write("4 - Вычислить apply(transform, 10)\n");
+    write("5 - Переключить transform: twice / add_one\n");
+    write("6 - Заменить A новым counter(10), сохранив alias\n");
+    write("7 - Показать меню\n");
+    write("0 - Выход\n");
+}
+
+int main() {
+    fn() -> int a = counter(10);
+    fn() -> int b = counter(100);
+    fn() -> int alias = a;
+    fn(int) -> int transform = twice;
+    bool doubling = true;
+    int[] line;
+
+    write("=== Функциональный тип, локальные функции, замыкания ===\n");
+    write("counter уже завершилась, но её локальная next помнит start.\n");
+    write("A и B имеют независимое состояние; A и alias пока делят одно.\n");
+    write("Переменная transform имеет тип fn(int) -> int; сейчас это twice.\n");
+    menu();
+
+    while (true) {
+        write("\nКоманда (цифра и Enter):\n");
+        int length = read_str(line);
+        if (length == 0) {
+            write("Конец ввода.\n");
+            break;
+        }
+        int command = -1;
+        if (length == 1) command = line[0];
+
+        if (command == '0') {
+            write("Демо завершена.\n");
+            break;
+        } else if (command == '1') {
+            write("A() = "); print_int(a()); write('\n');
+        } else if (command == '2') {
+            write("B() = "); print_int(b()); write('\n');
+        } else if (command == '3') {
+            write("alias() = "); print_int(alias()); write('\n');
+        } else if (command == '4') {
+            if (doubling) write("apply(twice, 10) = ");
+            else write("apply(add_one, 10) = ");
+            print_int(apply(transform, 10)); write('\n');
+        } else if (command == '5') {
+            doubling = !doubling;
+            if (doubling) {
+                transform = twice;
+                write("transform = twice: теперь умножает на 2.\n");
+            } else {
+                transform = add_one;
+                write("transform = add_one: теперь прибавляет 1.\n");
+            }
+        } else if (command == '6') {
+            a = counter(10);
+            write("A = counter(10): новое окружение. Следующий A() вернёт 11.\n");
+            write("alias продолжает хранить прежнее окружение и его состояние.\n");
+        } else if (command == '7') {
+            menu();
+        } else {
+            write("Неизвестная команда. Введите одну цифру от 0 до 7.\n");
+        }
+    }
+    return 0;
+}

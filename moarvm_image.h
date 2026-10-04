@@ -21,6 +21,8 @@ typedef struct {
     uint32_t code_obj_sc_idx;
     uint32_t num_local_debug_names;
     uint16_t *local_types;
+    uint16_t *lexical_types;
+    uint32_t *lexical_name_indices;
 } MoarVMFrame;
 
 typedef struct {

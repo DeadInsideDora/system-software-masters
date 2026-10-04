@@ -16,7 +16,6 @@ typedef struct {
     const MoarVMProgramModel *model;
     const MoarVMFunctionModel *fn;
     MoarVMImage *image;
-    uint16_t *variable_registers;
     uint16_t *register_types;
     size_t registers;
     uint32_t *frame_ids;
@@ -131,6 +130,7 @@ static Value boot(Compiler *c, uint16_t op) {
 static Value hash(Compiler *);
 static void bind(Compiler *, Value, const char *, Value);
 static Value fetch(Compiler *, Value, const char *);
+static void require_object(Compiler *, Value, const char *);
 static Value convert(Compiler *c, Value v, MoarVMType type) {
     if (v.type == type)
         return v;
@@ -158,7 +158,32 @@ static Value convert(Compiler *c, Value v, MoarVMType type) {
     return v;
 }
 static Value convert_type(Compiler *c, Value v, const AST *type_info) {
-    return convert(c, v, moarvm_type_from_ast(type_info));
+    MoarVMType type = moarvm_type_from_ast(type_info);
+    if (type == MV_FUNCTION) {
+        if (v.type != MV_FUNCTION || (v.type_info && !moarvm_types_equal(v.type_info, type_info)))
+            fail(c, "function type mismatch");
+        v.type_info = type_info;
+        return v;
+    }
+    if (type == MV_OBJECT) {
+        if (v.type == MV_DYNAMIC)
+            require_object(c, v, type_info->children[0]->label);
+        else if (v.type != MV_OBJECT ||
+                 (v.type_info &&
+                  !objects_subtype(c->model->objects, v.type_info->children[0]->label,
+                                   type_info->children[0]->label)))
+            fail(c, "object type mismatch: expected %s", type_info->children[0]->label);
+        v.type = type;
+        v.type_info = type_info;
+        return v;
+    }
+    if (type == MV_OBJECT_ARRAY) {
+        if (v.type != type || (v.type_info && !moarvm_types_equal(v.type_info, type_info)))
+            fail(c, "object array type mismatch");
+        v.type_info = type_info;
+        return v;
+    }
+    return convert(c, v, type);
 }
 static uint32_t jump(Compiler *c, uint16_t op, Value condition) {
     if (op == OP_GOTO)
@@ -174,29 +199,37 @@ static void here(Compiler *c, uint32_t at) {
     patch(c, at, (uint32_t)c->image->bytecode_size);
 }
 static Value empty_array(Compiler *c, MoarVMType type) {
-    Value t = boot(c, type == MV_STRING_ARRAY ? OP_BOOTSTRARRAY : OP_BOOTINTARRAY),
+    Value t = boot(c, type == MV_STRING_ARRAY   ? OP_BOOTSTRARRAY
+                      : type == MV_OBJECT_ARRAY ? OP_BOOTARRAY
+                                                : OP_BOOTINTARRAY),
           v = temp(c, type);
     E2(c, CREATE, v.reg, t.reg);
     return v;
 }
 static Value default_value(Compiler *c, MoarVMType type) {
+    if (type == MV_FUNCTION || type == MV_OBJECT) {
+        Value v = temp(c, type);
+        E1(c, NULL, v.reg);
+        return v;
+    }
     if (type == MV_STRING)
         return textval(c, "");
-    if (type == MV_INT_ARRAY || type == MV_STRING_ARRAY)
+    if (type == MV_INT_ARRAY || type == MV_STRING_ARRAY || type == MV_OBJECT_ARRAY)
         return empty_array(c, type);
     return convert(c, integer(c, 0), type);
 }
 typedef struct {
     const MoarVMVariableModel *var;
+    unsigned depth;
     size_t slot;
 } Binding;
 static Binding binding(Compiler *c, const char *name) {
     Binding b = {0};
-    b.var = moarvm_find_variable(c->fn, name);
+    b.var = moarvm_resolve_variable(c->model, c->fn, name, &b.depth, &b.slot);
     if (!b.var)
         fail(c, "unknown variable: %s", name);
-    else
-        b.slot = (size_t)(b.var - c->fn->vars);
+    if (b.depth > UINT16_MAX || b.slot > UINT16_MAX)
+        fail(c, "lexical address out of range");
     return b;
 }
 static Value load_binding(Compiler *c, Binding b) {
@@ -204,12 +237,12 @@ static Value load_binding(Compiler *c, Binding b) {
         return (Value){0};
     Value v = temp(c, b.var->type);
     v.type_info = b.var->type_info;
-    E2(c, SET, v.reg, c->variable_registers[b.slot]);
+    E3(c, GETLEX, v.reg, b.slot, b.depth);
     return v;
 }
 static void store_binding(Compiler *c, Binding b, Value v) {
     if (b.var)
-        E2(c, SET, c->variable_registers[b.slot], v.reg);
+        E3(c, BINDLEX, b.slot, b.depth, v.reg);
 }
 static Value expr(Compiler *, AST *);
 static Value dispatch(Compiler *c, Value code, MoarVMType result, Value *args, size_t count) {
@@ -244,27 +277,45 @@ static Value dispatch(Compiler *c, Value code, MoarVMType result, Value *args, s
     return v;
 }
 static Value frame_code(Compiler *c, uint32_t frame) {
-    Value v = temp(c, MV_DYNAMIC);
+    Value v = temp(c, MV_FUNCTION);
     if (frame >= UINT16_MAX)
         fail(c, "too many frames");
     E2(c, GETCODE, v.reg, frame);
     return v;
 }
+static Value function_value(Compiler *c, const MoarVMFunctionModel *f) {
+    if (!f->has_body)
+        fail(c, "undefined function: %s", f->source_name);
+    Value v = frame_code(c, c->frame_ids[f - c->model->functions]);
+    v.type_info = f->value_type;
+    return v;
+}
 static Value call_frame(Compiler *c, uint32_t frame, MoarVMType result, Value *args, size_t count) {
     return dispatch(c, frame_code(c, frame), result, args, count);
 }
-static Value user_call(Compiler *c, const MoarVMFunctionModel *f, AST *args) {
+static Value invoke(Compiler *c, Value code, AST *args, const char *name) {
+    if (code.type != MV_FUNCTION || !code.type_info) {
+        fail(c, "call requires a function type: %s", name);
+        return (Value){0};
+    }
+    const AST *signature = code.type_info;
     size_t count = args ? (size_t)args->nchildren : 0;
-    if (count != f->param_count) {
-        fail(c, "%s expects %zu arguments, got %zu", f->source_name, f->param_count, count);
+    size_t expected = (size_t)signature->nchildren - 1;
+    if (count != expected) {
+        fail(c, "%s expects %zu arguments, got %zu", name, expected, count);
         return (Value){0};
     }
     Value *values = calloc(count ? count : 1, sizeof(*values));
     for (size_t i = 0; i < count; i++)
-        values[i] = convert(c, expr(c, args->children[i]), f->vars[i].type);
-    Value result = call_frame(c, c->frame_ids[f - c->model->functions], f->return_type, values, count);
+        values[i] = convert_type(c, expr(c, args->children[i]), signature->children[i + 1]);
+    const AST *result_type = signature->children[0];
+    Value result = dispatch(c, code, moarvm_type_from_ast(result_type), values, count);
+    result.type_info = result_type;
     free(values);
     return result;
+}
+static Value user_call(Compiler *c, const MoarVMFunctionModel *f, AST *args) {
+    return invoke(c, function_value(c, f), args, f->source_name);
 }
 static char *unquote(Compiler *c, const char *s) {
     size_t len = strlen(s);
@@ -301,6 +352,8 @@ static char *unquote(Compiler *c, const char *s) {
     return out;
 }
 static Value literal(Compiler *c, const char *s) {
+    if (!strcmp(s, "null"))
+        return default_value(c, MV_OBJECT);
     if (s[0] == '"') {
         char *decoded = unquote(c, s);
         Value v = textval(c, decoded);
@@ -337,6 +390,14 @@ static Value literal(Compiler *c, const char *s) {
     return integer(c, n);
 }
 static Value scalar_binary(Compiler *c, const char *op, Value a, Value b) {
+    if (a.type == MV_OBJECT || b.type == MV_OBJECT) {
+        if (a.type != MV_OBJECT || b.type != MV_OBJECT || (strcmp(op, "==") && strcmp(op, "!="))) {
+            fail(c, "objects support only reference equality with objects or null");
+            return (Value){0};
+        }
+        Value equal = binary(c, OP_EQADDR, MV_INT, a, b);
+        return !strcmp(op, "==") ? equal : unary(c, OP_NOT_I, MV_INT, equal);
+    }
     struct {
         const char *name;
         uint16_t integer_op, string_op;
@@ -395,6 +456,11 @@ static Value index_read(Compiler *c, Value base, Value index) {
         return binary(c, OP_ATPOS_I, MV_INT, base, index);
     if (base.type == MV_STRING_ARRAY)
         return binary(c, OP_ATPOS_S, MV_STRING, base, index);
+    if (base.type == MV_OBJECT_ARRAY) {
+        Value v = binary(c, OP_ATPOS_O, MV_OBJECT, base, index);
+        v.type_info = base.type_info ? base.type_info->children[0] : NULL;
+        return v;
+    }
     if (base.type == MV_DYNAMIC) {
         Value out = temp(c, MV_INT), isstr = unary(c, OP_ISSTR, MV_INT, base);
         uint32_t array = jump(c, OP_UNLESS_I, isstr);
@@ -410,6 +476,99 @@ static Value index_read(Compiler *c, Value base, Value index) {
     fail(c, "indexing requires a string or array");
     return base;
 }
+static void runtime_error(Compiler *c, const char *message) {
+    Value error = temp(c, MV_DYNAMIC), text = textval(c, message);
+    E2(c, DIE, error.reg, text.reg);
+}
+static void nonnull(Compiler *c, Value object) {
+    uint32_t ok = jump(c, OP_UNLESS_I, unary(c, OP_ISNULL, MV_INT, object));
+    runtime_error(c, "member access on null object");
+    here(c, ok);
+}
+static Value object_is(Compiler *c, Value value, const char *name) {
+    if (value.type != MV_OBJECT && value.type != MV_DYNAMIC) {
+        fail(c, "match requires an object");
+        return integer(c, 0);
+    }
+    Value result = integer(c, 0);
+    uint32_t null = jump(c, OP_IF_I, unary(c, OP_ISNULL, MV_INT, value));
+    uint32_t other = jump(c, OP_UNLESS_I, unary(c, OP_ISHASH, MV_INT, value));
+    Value tag = fetch(c, value, "@class");
+    uint32_t untagged = jump(c, OP_IF_I, unary(c, OP_ISNULL, MV_INT, tag));
+    tag = convert(c, tag, MV_INT);
+    for (size_t i = 0; i < c->model->objects->count; i++)
+        if (objects_subtype(c->model->objects, c->model->objects->classes[i].name, name)) {
+            Value equal = binary(c, OP_EQ_I, MV_INT, tag, integer(c, (int64_t)i));
+            Value both = binary(c, OP_BOR_I, MV_INT, result, equal);
+            E2(c, SET, result.reg, both.reg);
+        }
+    here(c, untagged);
+    here(c, other);
+    here(c, null);
+    return result;
+}
+static void require_object(Compiler *c, Value value, const char *name) {
+    uint32_t null = jump(c, OP_IF_I, unary(c, OP_ISNULL, MV_INT, value));
+    uint32_t valid = jump(c, OP_IF_I, object_is(c, value, name));
+    runtime_error(c, "object type mismatch at runtime");
+    here(c, valid);
+    here(c, null);
+}
+static const ObjectClass *value_class(Compiler *c, Value base) {
+    if (base.type != MV_OBJECT || !base.type_info) {
+        fail(c, "member access requires a typed object");
+        return NULL;
+    }
+    return objects_find(c->model->objects, base.type_info->children[0]->label);
+}
+static const AST *member_type(Compiler *c, Value base, const char *name, int writing) {
+    const ObjectClass *class = value_class(c, base);
+    const ObjectField *field = objects_field(class, name);
+    if (field)
+        return field->type;
+    const ObjectMethod *method = objects_method(class, name);
+    if (method && !writing)
+        return method->type;
+    fail(c, method ? "cannot assign to method: %s" : "unknown member: %s", name);
+    return NULL;
+}
+static char *member_key(const char *name, int method) {
+    size_t len = strlen(name) + 3;
+    char *key = malloc(len);
+    snprintf(key, len, "%c:%s", method ? 'm' : 'f', name);
+    return key;
+}
+static Value member_read(Compiler *c, Value base, const char *name) {
+    const AST *type = member_type(c, base, name, 0);
+    if (!type)
+        return (Value){0};
+    const ObjectClass *class = value_class(c, base);
+    nonnull(c, base);
+    char *key = member_key(name, objects_field(class, name) == NULL);
+    Value value = convert(c, fetch(c, base, key), moarvm_type_from_ast(type));
+    value.type_info = type;
+    free(key);
+    return value;
+}
+static void member_write(Compiler *c, Value base, const char *name, Value value, int method) {
+    nonnull(c, base);
+    char *key = member_key(name, method);
+    bind(c, base, key, value);
+    free(key);
+}
+static Value new_object(Compiler *c, AST *n) {
+    const ObjectClass *class = objects_find(c->model->objects, n->label);
+    Value object = hash(c);
+    object.type = MV_OBJECT;
+    object.type_info = n->children[0];
+    bind(c, object, "@class", integer(c, (int64_t)(class - c->model->objects->classes)));
+    for (size_t i = 0; i < class->field_count; i++) {
+        char *key = member_key(class->fields[i].name, 0);
+        bind(c, object, key, default_value(c, moarvm_type_from_ast(class->fields[i].type)));
+        free(key);
+    }
+    return object;
+}
 static Value assignment(Compiler *c, AST *node) {
     AST *lhs = node->children[0];
     Value dst = {0}, base = {0}, index = {0}, previous = {0};
@@ -419,16 +578,30 @@ static Value assignment(Compiler *c, AST *node) {
         target = binding(c, lhs->label);
         if (!target.var)
             return dst;
+        if (target.var->is_function)
+            fail(c, "cannot assign to local function: %s", lhs->label);
+        if (!strcmp(lhs->label, "this"))
+            fail(c, "cannot reassign this");
         dst.type = target.var->type;
         dst.type_info = target.var->type_info;
         target_type = target.var->type_info;
+    } else if (lhs->type == NODE_MEMBER) {
+        base = expr(c, lhs->children[0]);
+        target_type = member_type(c, base, lhs->label, 1);
+        if (!target_type)
+            return dst;
+        dst.type = moarvm_type_from_ast(target_type);
     } else if (lhs->type == NODE_INDEX) {
         base = expr(c, lhs->children[0]);
         index = convert(c, expr(c, lhs->children[1]->children[0]), MV_INT);
         if (base.type != MV_INT_ARRAY && base.type != MV_STRING_ARRAY &&
-            base.type != MV_DYNAMIC)
+            base.type != MV_OBJECT_ARRAY && base.type != MV_DYNAMIC)
             fail(c, "array assignment requires a mutable array");
-        dst.type = base.type == MV_STRING_ARRAY ? MV_STRING : MV_INT;
+        dst.type = base.type == MV_STRING_ARRAY   ? MV_STRING
+                   : base.type == MV_OBJECT_ARRAY ? MV_OBJECT
+                                                  : MV_INT;
+        if (base.type == MV_OBJECT_ARRAY && base.type_info)
+            target_type = base.type_info->children[0];
     } else {
         fail(c, "assignment target must be a variable or array element");
         return dst;
@@ -436,6 +609,8 @@ static Value assignment(Compiler *c, AST *node) {
     if (strcmp(node->label, "=")) {
         if (lhs->type == NODE_INDEX)
             previous = index_read(c, base, index);
+        else if (lhs->type == NODE_MEMBER)
+            previous = member_read(c, base, lhs->label);
         else {
             previous = load_binding(c, target);
         }
@@ -449,9 +624,13 @@ static Value assignment(Compiler *c, AST *node) {
                                                       : convert(c, rhs, dst.type);
     if (lhs->type == NODE_IDENTIFIER)
         store_binding(c, target, rhs);
+    else if (lhs->type == NODE_MEMBER)
+        member_write(c, base, lhs->label, rhs, 0);
     else
         emit(c,
-             dst.type == MV_STRING ? OP_BINDPOS_S : OP_BINDPOS_I,
+             dst.type == MV_STRING   ? OP_BINDPOS_S
+             : dst.type == MV_OBJECT ? OP_BINDPOS_O
+                                     : OP_BINDPOS_I,
              (uint64_t)base.reg, (uint64_t)index.reg, (uint64_t)rhs.reg);
     return rhs;
 }
@@ -477,7 +656,7 @@ static void print_value(Compiler *c, Value arg, int as_character) {
 static Value length(Compiler *c, Value a) {
     if (a.type == MV_STRING)
         return unary(c, OP_CHARS, MV_INT, a);
-    if (a.type == MV_INT_ARRAY || a.type == MV_STRING_ARRAY)
+    if (a.type == MV_INT_ARRAY || a.type == MV_STRING_ARRAY || a.type == MV_OBJECT_ARRAY)
         return unary(c, OP_ELEMS, MV_INT, a);
     if (a.type == MV_DYNAMIC) {
         Value out = temp(c, MV_INT), isstr = unary(c, OP_ISSTR, MV_INT, a);
@@ -496,12 +675,21 @@ static Value length(Compiler *c, Value a) {
 }
 static Value call(Compiler *c, AST *node) {
     AST *callee = node->children[0], *args = node->children[1];
-    if (callee->type != NODE_IDENTIFIER) {
-        fail(c, "call requires a named function");
-        return (Value){0};
-    }
+    if (callee->type != NODE_IDENTIFIER)
+        return invoke(c, expr(c, callee), args, "expression");
     const char *name = callee->label;
+    if (moarvm_resolve_variable(c->model, c->fn, name, NULL, NULL))
+        return invoke(c, load_binding(c, binding(c, name)), args, name);
     size_t n = (size_t)args->nchildren;
+    const ObjectClass *class = objects_find(c->model->objects, name);
+    if (class && !class->constructor && class->field_count && !n) {
+        size_t len = strlen(name) + 12;
+        char *default_name = malloc(len);
+        snprintf(default_name, len, "$default$%s$", name);
+        const MoarVMFunctionModel *def = moarvm_find_function(c->model, default_name);
+        free(default_name);
+        return user_call(c, def, args);
+    }
     const MoarVMFunctionModel *f = moarvm_find_function(c->model, name);
     if (f && f->has_body)
         return user_call(c, f, args);
@@ -567,11 +755,36 @@ static Value expr(Compiler *c, AST *n) {
     if (!n || c->error)
         return (Value){.type = MV_INT};
     switch (n->type) {
+    case NODE_OBJECT_NEW:
+        return new_object(c, n);
+    case NODE_MEMBER: {
+        Value base = expr(c, n->children[0]);
+        return member_read(c, base, n->label);
+    }
+    case NODE_OBJECT_IS:
+        return object_is(c, expr(c, n->children[0]), n->label);
+    case NODE_OBJECT_CAST: {
+        Value value = expr(c, n->children[0]);
+        value.type = MV_OBJECT;
+        value.type_info = n->children[1];
+        return value;
+    }
+    case NODE_METHOD_BIND: {
+        Value base = expr(c, n->children[0]), value = expr(c, n->children[1]);
+        const AST *type = member_type(c, base, n->label, 0);
+        if (type)
+            value = convert_type(c, value, type);
+        member_write(c, base, n->label, value, 1);
+        return value;
+    }
     case NODE_LITERAL:
         return literal(c, n->label);
     case NODE_IDENTIFIER: {
-        if (moarvm_find_variable(c->fn, n->label))
+        if (moarvm_resolve_variable(c->model, c->fn, n->label, NULL, NULL))
             return load_binding(c, binding(c, n->label));
+        const MoarVMFunctionModel *f = moarvm_find_function(c->model, n->label);
+        if (f)
+            return function_value(c, f);
         fail(c, "unknown variable: %s", n->label);
         return (Value){0};
     }
@@ -616,7 +829,9 @@ static void return_value(Compiler *c, MoarVMType type, Value v) {
         E0(c, RETURN);
         return;
     }
-    v = convert(c, v, type);
+    v = type == MV_FUNCTION || type == MV_OBJECT || type == MV_OBJECT_ARRAY
+            ? convert_type(c, v, c->fn->return_type_info)
+            : convert(c, v, type);
     emit(c,
          type == MV_INT      ? OP_RETURN_I
          : type == MV_STRING ? OP_RETURN_S
@@ -636,7 +851,22 @@ static void end_frame(Compiler *c, const char *name) {
     f.bytecode_size = (uint32_t)c->image->bytecode_size - c->frame_start;
     f.name_string_index = string(c, name);
     f.cuuid_string_index = f.name_string_index;
-    f.outer_index = (uint16_t)c->image->frame_count;
+    f.outer_index = c->fn && c->fn->parent_index >= 0 ? (uint16_t)c->frame_ids[c->fn->parent_index]
+                                                      : (uint16_t)c->image->frame_count;
+    if (c->fn && c->fn->var_count) {
+        f.num_lexicals = (uint32_t)c->fn->var_count;
+        f.lexical_types = malloc(f.num_lexicals * sizeof(*f.lexical_types));
+        f.lexical_name_indices = malloc(f.num_lexicals * sizeof(*f.lexical_name_indices));
+        if (!f.lexical_types || !f.lexical_name_indices) {
+            moarvm_frame_clear(&f);
+            fail(c, "lexical allocation failed");
+            return;
+        }
+        for (uint32_t i = 0; i < f.num_lexicals; i++) {
+            f.lexical_types[i] = regtype(c->fn->vars[i].type);
+            f.lexical_name_indices[i] = string(c, c->fn->vars[i].name);
+        }
+    }
     if (moarvm_frame_set_local_types(&f, c->register_types, (uint32_t)c->registers) != 0 ||
         moarvm_image_add_frame(c->image, &f) == UINT32_MAX)
         fail(c, "frame allocation failed");
@@ -646,27 +876,37 @@ static void compile_function(Compiler *c, const MoarVMFunctionModel *f) {
     c->fn = f;
     begin_frame(c);
     if (f->var_count > UINT16_MAX) {
-        fail(c, "too many variables");
+        fail(c, "too many lexical variables");
         return;
     }
     if (f->param_count > INT16_MAX) {
         fail(c, "too many parameters");
         return;
     }
-    free(c->variable_registers);
-    c->variable_registers = calloc(f->var_count ? f->var_count : 1, sizeof(*c->variable_registers));
-    for (size_t i = 0; i < f->var_count; i++)
-        c->variable_registers[i] = temp(c, f->vars[i].type).reg;
     E2(c, CHECKARITY, f->param_count, f->param_count);
     for (size_t i = 0; i < f->param_count; i++) {
-        uint16_t op = f->vars[i].type == MV_INT ? OP_PARAM_RP_I
-                      : f->vars[i].type == MV_STRING ? OP_PARAM_RP_S : OP_PARAM_RP_O;
-        emit(c, op, (uint64_t)c->variable_registers[i], (uint64_t)i);
+        Value v = temp(c, f->vars[i].type);
+        emit(c,
+             v.type == MV_INT      ? OP_PARAM_RP_I
+             : v.type == MV_STRING ? OP_PARAM_RP_S
+                                   : OP_PARAM_RP_O,
+             (uint64_t)v.reg, (uint64_t)i);
+        E3(c, BINDLEX, i, 0, v.reg);
     }
     E0(c, PARAMNAMESUSED);
     for (size_t i = f->param_count; i < f->var_count; i++) {
-        Value initial = default_value(c, f->vars[i].type);
-        E2(c, SET, c->variable_registers[i], initial.reg);
+        if (f->vars[i].is_function)
+            continue;
+        Value d = default_value(c, f->vars[i].type);
+        E3(c, BINDLEX, i, 0, d.reg);
+    }
+    for (size_t i = 0; i < c->model->function_count; i++) {
+        const MoarVMFunctionModel *child = &c->model->functions[i];
+        if (child->parent_index != (int)(f - c->model->functions))
+            continue;
+        Value code = function_value(c, child), closure = temp(c, MV_FUNCTION);
+        E2(c, TAKECLOSURE, closure.reg, code.reg);
+        store_binding(c, binding(c, child->signature->label), closure);
     }
     const FunctionCFG *cfg = f->cfg;
     uint32_t *offsets = calloc((size_t)cfg->nnodes, sizeof(*offsets));
@@ -681,8 +921,10 @@ static void compile_function(Compiler *c, const MoarVMFunctionModel *f) {
         CFGNode *n = cfg->nodes[i];
         offsets[n->id] = (uint32_t)c->image->bytecode_size;
         if (n == cfg->exit) {
-            Value value = f->return_type == MV_VOID ? (Value){.type = MV_VOID}
-                          : default_value(c, f->return_type);
+            const MoarVMVariableModel *result = moarvm_find_variable(f, "result");
+            Value value = f->return_type == MV_VOID     ? (Value){.type = MV_VOID}
+                          : result && !result->is_param ? load_binding(c, binding(c, "result"))
+                                                        : default_value(c, f->return_type);
             return_value(c, f->return_type, value);
             continue;
         }
@@ -830,7 +1072,6 @@ int moarvm_generate_image(const MoarVMProgramModel *model, MoarVMImage *image, c
         image->main_frame_index = (uint32_t)image->frame_count;
     }
     free(c.frame_ids);
-    free(c.variable_registers);
     free(c.register_types);
     if (c.error) {
         if (error)

@@ -23,7 +23,15 @@ typedef enum NodeType {
     NODE_LITERAL,
     NODE_IDENTIFIER,
     NODE_TYPE,
-    NODE_CONTINUE
+    NODE_CONTINUE,
+    NODE_CLASS,
+    NODE_MEMBER,
+    NODE_MATCH,
+    NODE_MATCH_CASE,
+    NODE_OBJECT_NEW,
+    NODE_OBJECT_IS,
+    NODE_OBJECT_CAST,
+    NODE_METHOD_BIND
 } NodeType;
 
 typedef struct AST {

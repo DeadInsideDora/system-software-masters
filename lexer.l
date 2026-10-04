@@ -24,12 +24,19 @@
 "break" return BREAK;
 "continue" return CONTINUE;
 "return" return RETURN;
+"fn" return FN;
+"class" return CLASS;
+"match" return MATCH;
+"this" return THIS;
+"super" return SUPER;
+"=>" return FATARROW;
+"->" return ARROW;
 "bool"|"byte"|"int"|"uint"|"long"|"ulong"|"char"|"string"|"void" { yylval->str=strdup(yytext); return TYPE; }
-"true"|"false" { yylval->str=strdup(yytext); return LITERAL; }
+"true"|"false"|"null" { yylval->str=strdup(yytext); return LITERAL; }
 0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+ { yylval->str=strdup(yytext); return LITERAL; }
 \"([^\"\\\n]|\\.)*\" { yylval->str=strdup(yytext); return LITERAL; }
 \'([^\'\\\n]|\\.)\' { yylval->str=strdup(yytext); return LITERAL; }
-[a-zA-Z_][a-zA-Z0-9_]* { yylval->str=strdup(yytext); return ID; }
+[a-zA-Z_][a-zA-Z0-9_]* { yylval->str=strdup(yytext); return parse_is_type(yyextra,yytext)?USER_TYPE:ID; }
 "=="|"!="|"<="|">="|"<"|">" { yylval->str=strdup(yytext); return RELOP; }
 "+="|"-="|"*="|"/="|"%=" { yylval->str=strdup(yytext); return ASSIGN; }
 "&&" return AND;

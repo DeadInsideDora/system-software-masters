@@ -39,6 +39,9 @@ typedef struct {
 #define OP_PARAM_RP_O 144u
 #define OP_PARAMNAMESUSED 558u
 #define OP_GETCODE 159u
+#define OP_GETLEX 35u
+#define OP_BINDLEX 36u
+#define OP_TAKECLOSURE 162u
 #define OP_NULL 247u
 #define OP_DISPATCH_V 826u
 #define OP_DISPATCH_I 827u
@@ -69,6 +72,9 @@ typedef struct {
 #define OP_ISSTR 349u
 #define OP_ISINT 347u
 #define OP_ISNULL 248u
+#define OP_ISHASH 351u
+#define OP_EQADDR 266u
+#define OP_DIE 176u
 #define OP_CREATE 254u
 #define OP_ATPOS_I 290u
 #define OP_ATPOS_S 292u
@@ -121,6 +127,9 @@ static const MoarVMOp moarvm_ops[] = {
     {144, "param_rp_o", "rh"},
     {558, "paramnamesused", ""},
     {159, "getcode", "rh"},
+    {35, "getlex", "rhh"},
+    {36, "bindlex", "hhr"},
+    {162, "takeclosure", "rr"},
     {247, "null", "r"},
     {826, "dispatch_v", "sh"},
     {827, "dispatch_i", "rsh"},
@@ -151,6 +160,9 @@ static const MoarVMOp moarvm_ops[] = {
     {349, "isstr", "rr"},
     {347, "isint", "rr"},
     {248, "isnull", "rr"},
+    {351, "ishash", "rr"},
+    {266, "eqaddr", "rrr"},
+    {176, "die", "rr"},
     {254, "create", "rr"},
     {290, "atpos_i", "rrr"},
     {292, "atpos_s", "rrr"},

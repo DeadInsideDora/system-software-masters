@@ -1,0 +1,18 @@
+fn(int) -> fn() -> int pair(int value) {
+    int inc() { value += 1; return value; }
+    int current() { return value; }
+    fn() -> int select(int mode) {
+        if (mode == 0) return inc;
+        return current;
+    }
+    return select;
+}
+int main() {
+    fn(int) -> fn() -> int choose = pair(40);
+    fn() -> int step = choose(0);
+    fn() -> int get = choose(1);
+    print_int(get()); write(' ');
+    print_int(step()); write(' ');
+    print_int(get()); write('\n');
+    return 0;
+}
